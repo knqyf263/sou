@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path"
+	"sync"
 	"time"
 )
 
 type FS struct {
-	file    *os.File
+	reader  io.ReadSeeker
 	fileMap map[string]*Entry
 }
 
@@ -78,9 +78,43 @@ type Entry struct {
 	Children []*Entry
 }
 
-func New(file *os.File) (*FS, error) {
+// readerAtWrapper wraps an io.ReadSeeker to implement io.ReaderAt
+type readerAtWrapper struct {
+	r  io.ReadSeeker
+	mu sync.Mutex // protects concurrent ReadAt calls
+}
+
+func (w *readerAtWrapper) ReadAt(p []byte, off int64) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Save the current position
+	current, err := w.r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+
+	// Seek to the desired offset
+	_, err = w.r.Seek(off, io.SeekStart)
+	if err != nil {
+		return 0, err
+	}
+
+	// Read the data
+	n, err = io.ReadFull(w.r, p)
+
+	// Restore the original position
+	_, seekErr := w.r.Seek(current, io.SeekStart)
+	if seekErr != nil && err == nil {
+		err = seekErr
+	}
+
+	return n, err
+}
+
+func New(reader io.ReadSeeker) (*FS, error) {
 	tarfs := &FS{
-		file: file,
+		reader: reader,
 		fileMap: map[string]*Entry{
 			// pseudo root
 			".": {
@@ -92,7 +126,7 @@ func New(file *os.File) (*FS, error) {
 		},
 	}
 
-	tr := tar.NewReader(file)
+	tr := tar.NewReader(reader)
 
 	for {
 		hdr, err := tr.Next()
@@ -103,7 +137,7 @@ func New(file *os.File) (*FS, error) {
 		}
 
 		// Get the current position
-		pos, err := file.Seek(0, io.SeekCurrent)
+		pos, err := reader.Seek(0, io.SeekCurrent)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +150,7 @@ func New(file *os.File) (*FS, error) {
 				linkname: hdr.Linkname,
 				size:     hdr.Size,
 				mode:     fs.FileMode(hdr.Mode),
-				modTime:  hdr.ModTime,
+				modTime:  hdr.ModTime.UTC(),
 			},
 			Offset: pos,
 			Size:   hdr.Size,
@@ -128,7 +162,6 @@ func New(file *os.File) (*FS, error) {
 		if parentEntry, exists := tarfs.fileMap[parentDir]; exists {
 			parentEntry.Children = append(parentEntry.Children, entry)
 		}
-
 	}
 
 	return tarfs, nil
@@ -150,7 +183,7 @@ func (tfs *FS) Open(name string) (fs.File, error) {
 		entry = targetEntry // Update entry to point to the target file
 	}
 
-	sr := io.NewSectionReader(tfs.file, entry.Offset, entry.Size)
+	sr := io.NewSectionReader(&readerAtWrapper{r: tfs.reader}, entry.Offset, entry.Size)
 
 	return &File{
 		Header:   entry.Header,
@@ -161,8 +194,9 @@ func (tfs *FS) Open(name string) (fs.File, error) {
 
 type File struct {
 	*Header  // Implement fs.FileInfo
-	r        io.Reader
+	r        *io.SectionReader
 	children []*Entry
+	readPos  int // Track the position in children for ReadDir
 }
 
 func (f *File) Stat() (fs.FileInfo, error) {
@@ -171,6 +205,10 @@ func (f *File) Stat() (fs.FileInfo, error) {
 
 func (f *File) Read(p []byte) (n int, err error) {
 	return f.r.Read(p)
+}
+
+func (f *File) Seek(offset int64, whence int) (int64, error) {
+	return f.r.Seek(offset, whence)
 }
 
 func (f *File) Close() error {
@@ -183,14 +221,25 @@ func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
 		return nil, &fs.PathError{Op: "readdir", Path: f.name, Err: fs.ErrInvalid}
 	}
 
-	if n <= 0 || len(f.children) < n {
-		n = len(f.children)
+	remaining := len(f.children) - f.readPos
+	if remaining == 0 {
+		if n <= 0 {
+			return nil, nil
+		}
+		return nil, io.EOF
 	}
 
-	var entries []fs.DirEntry
-	for _, childEntry := range f.children[:n] {
-		entries = append(entries, &DirEntry{Header: childEntry.Header})
+	if n <= 0 {
+		n = remaining
+	} else if n > remaining {
+		n = remaining
 	}
+
+	entries := make([]fs.DirEntry, n)
+	for i := 0; i < n; i++ {
+		entries[i] = &DirEntry{Header: f.children[f.readPos+i].Header}
+	}
+	f.readPos += n
 
 	return entries, nil
 }
