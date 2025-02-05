@@ -235,7 +235,11 @@ func TestModelUpdate(t *testing.T) {
 				keys: newKeyMap(),
 			}
 			updatedModel, _ := model.Update(tt.msg)
-			assert.Equal(t, tt.wantMode, updatedModel.(Model).mode)
+			m, ok := updatedModel.(*Model)
+			if !ok {
+				t.Fatal("failed to cast updated model")
+			}
+			assert.Equal(t, tt.wantMode, m.mode)
 		})
 	}
 }

@@ -34,31 +34,31 @@ func createTestTar(t *testing.T) []byte {
 		{
 			name:    "dir1",
 			isDir:   true,
-			mode:    fs.ModeDir | 0755,
+			mode:    fs.ModeDir | 0o755,
 			modTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:    "dir1/dir2",
 			isDir:   true,
-			mode:    fs.ModeDir | 0755,
+			mode:    fs.ModeDir | 0o755,
 			modTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:    "file1.txt",
 			content: "Hello, World!",
-			mode:    0644,
+			mode:    0o644,
 			modTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:    "dir1/file2.txt",
 			content: "Hello from dir1!",
-			mode:    0644,
+			mode:    0o644,
 			modTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
 			name:    "dir1/dir2/file3.txt",
 			content: "Hello from dir2!",
-			mode:    0644,
+			mode:    0o644,
 			modTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 	}
@@ -271,7 +271,7 @@ func TestHeaderMethods(t *testing.T) {
 	}{
 		{"Name", info.Name(), "file1.txt"},
 		{"Size", info.Size(), int64(13)},
-		{"Mode", info.Mode(), fs.FileMode(0644)},
+		{"Mode", info.Mode(), fs.FileMode(0o644)},
 		{"ModTime", info.ModTime(), modTime},
 		{"IsDir", info.IsDir(), false},
 	}

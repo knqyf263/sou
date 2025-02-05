@@ -17,17 +17,12 @@ func main() {
 	flag.Parse()
 	if flag.NArg() != 1 {
 		fmt.Println("Usage: sou <image-name>")
-		os.Exit(1)
+		return
 	}
 
 	// Setup signal handling for cleanup
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		cleanup()
-		os.Exit(1)
-	}()
 
 	// Ensure cleanup on program exit
 	defer cleanup()
@@ -37,7 +32,7 @@ func main() {
 	// Create and run program with initial model
 	model, cmd := ui.NewModel(imageName)
 	p := tea.NewProgram(
-		model,
+		&model,
 		tea.WithAltScreen(),
 	)
 
@@ -48,9 +43,16 @@ func main() {
 		}()
 	}
 
+	// Handle signals
+	go func() {
+		<-sigChan
+		cleanup()
+		p.Kill()
+	}()
+
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
-		os.Exit(1)
+		return
 	}
 }
 

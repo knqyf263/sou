@@ -11,13 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/daemon"
-	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
@@ -54,7 +52,7 @@ func createTestLayer(t *testing.T) (v1.Layer, error) {
 	if err := tw.WriteHeader(&tar.Header{
 		Name:     filepath.Join(".", "test.txt"), // Use relative path
 		Size:     int64(len(content)),
-		Mode:     0644,
+		Mode:     0o644,
 		Typeflag: tar.TypeReg,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to write header: %v", err)
@@ -66,7 +64,7 @@ func createTestLayer(t *testing.T) (v1.Layer, error) {
 	// Add a directory
 	if err := tw.WriteHeader(&tar.Header{
 		Name:     filepath.Join(".", "testdir"), // Use relative path
-		Mode:     0755,
+		Mode:     0o755,
 		Typeflag: tar.TypeDir,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to write directory header: %v", err)
@@ -77,7 +75,7 @@ func createTestLayer(t *testing.T) (v1.Layer, error) {
 	if err := tw.WriteHeader(&tar.Header{
 		Name:     filepath.Join(".", "testdir", "file.txt"), // Use relative path
 		Size:     int64(len(dirContent)),
-		Mode:     0644,
+		Mode:     0o644,
 		Typeflag: tar.TypeReg,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to write header: %v", err)
@@ -93,51 +91,6 @@ func createTestLayer(t *testing.T) (v1.Layer, error) {
 	return tarball.LayerFromOpener(func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 	})
-}
-
-// setupFakeImage creates a fake image for testing with specific layers
-func setupFakeImage(t *testing.T) v1.Image {
-	img, err := random.Image(1024, 1)
-	if err != nil {
-		t.Fatalf("Failed to create random image: %v", err)
-	}
-
-	testLayer, err := createTestLayer(t)
-	if err != nil {
-		t.Fatalf("Failed to create test layer: %v", err)
-	}
-
-	img, err = mutate.AppendLayers(img, testLayer)
-	if err != nil {
-		t.Fatalf("Failed to append test layer: %v", err)
-	}
-
-	// Add history to the config
-	cfg, err := img.ConfigFile()
-	if err != nil {
-		t.Fatalf("Failed to get config file: %v", err)
-	}
-
-	cfg.History = []v1.History{
-		{
-			Created:   v1.Time{Time: time.Now()},
-			CreatedBy: "test command 1",
-		},
-	}
-
-	return img
-}
-
-// createTempDir creates a temporary directory for testing
-func createTempDir(t *testing.T) string {
-	dir, err := os.MkdirTemp("", "image-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(dir)
-	})
-	return dir
 }
 
 func TestNewImage(t *testing.T) {
@@ -425,7 +378,7 @@ func TestCleanupCache(t *testing.T) {
 	for _, f := range testFiles {
 		path := filepath.Join(tmpDir, f)
 		if filepath.Dir(path) != tmpDir {
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatalf("Failed to create directory: %v", err)
 			}
 		}

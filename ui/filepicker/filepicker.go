@@ -28,7 +28,7 @@ var debugLogger *log.Logger
 
 func init() {
 	// Open log file
-	logFile, err := os.OpenFile("/tmp/filepicker.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile("/tmp/filepicker.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
@@ -196,7 +196,7 @@ func New(fsys fs.FS) Model {
 	}
 }
 
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return func() tea.Msg {
 		return m.loadFiles("")
 	}
@@ -210,7 +210,7 @@ type filesLoadedMsg struct {
 	focusPath string
 }
 
-func (m Model) loadFiles(focusPath string) tea.Msg {
+func (m *Model) loadFiles(focusPath string) tea.Msg {
 	if debugLogger != nil {
 		debugLogger.Printf("===== Loading Files Start =====")
 		debugLogger.Printf("Loading files for path: %s", m.currentPath)
@@ -287,7 +287,7 @@ func (m Model) loadFiles(focusPath string) tea.Msg {
 	}
 }
 
-func (m Model) getVisibleFiles() []fs.DirEntry {
+func (m *Model) getVisibleFiles() []fs.DirEntry {
 	if m.filterStr == "" || m.filterStr == "/" {
 		return m.files
 	}
@@ -637,7 +637,7 @@ func (m Model) renderFile(file fs.DirEntry, index int) string {
 
 	// Add name with appropriate style
 	if file.IsDir() {
-		name = name + "/"
+		name += "/"
 		if index == m.selectedIndex {
 			style = style.Inherit(m.styles.Directory)
 		} else {
@@ -665,7 +665,7 @@ func (m *Model) SetHeight(height int) {
 	m.height = height
 }
 
-func (m *Model) SelectedFile() (string, string, bool) {
+func (m *Model) SelectedFile() (name string, absPath string, ok bool) {
 	visibleFiles := m.getVisibleFiles()
 	if len(visibleFiles) == 0 || m.selectedIndex >= len(visibleFiles) {
 		return "", "", false
@@ -674,8 +674,8 @@ func (m *Model) SelectedFile() (string, string, bool) {
 	if selected.IsDir() {
 		return "", "", false
 	}
-	name := selected.Name()
-	absPath := filepath.Join(m.currentPath, name)
+	name = selected.Name()
+	absPath = filepath.Join(m.currentPath, name)
 	return name, absPath, true
 }
 

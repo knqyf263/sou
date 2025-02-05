@@ -164,17 +164,17 @@ type containerFS struct {
 	layer *container.Layer
 }
 
-func (c *containerFS) Open(name string) (fs.File, error) {
+func (c *containerFS) Open(filePath string) (fs.File, error) {
 	if c.layer == nil {
 		return nil, fmt.Errorf("layer is nil")
 	}
 
 	// Convert path for tarfs
-	tarfsPath := name
-	if name == "." {
+	tarfsPath := filePath
+	if filePath == "." {
 		tarfsPath = "/"
-	} else if !strings.HasPrefix(name, "/") {
-		tarfsPath = "/" + name
+	} else if filePath != "" && filePath[0] == '/' {
+		tarfsPath = filePath[1:]
 	}
 
 	return &containerDir{layer: c.layer, path: tarfsPath}, nil
@@ -205,7 +205,7 @@ func (d *containerDir) ReadDir(n int) ([]fs.DirEntry, error) {
 		tarfsPath := d.path
 		if tarfsPath == "/" {
 			tarfsPath = "."
-		} else if strings.HasPrefix(tarfsPath, "/") {
+		} else if tarfsPath != "" && tarfsPath[0] == '/' {
 			tarfsPath = tarfsPath[1:]
 		}
 
@@ -280,7 +280,7 @@ func (i containerFileInfo) Size() int64 {
 }
 
 func (i containerFileInfo) Mode() fs.FileMode {
-	return fs.FileMode(0644)
+	return fs.FileMode(0o644)
 }
 
 func (i containerFileInfo) ModTime() time.Time {
@@ -295,22 +295,15 @@ func (i containerFileInfo) Sys() interface{} {
 	return nil
 }
 
-// Track last logged progress to reduce debug output
-var lastLoggedProgress float64
-
 // Global channel for progress updates
 var progressChan chan float64
-
-type imageSourceMsg struct {
-	isLocalImage bool
-}
 
 type copyToClipboardMsg struct {
 	err error
 }
 
 // Add this function to get the appropriate clipboard command
-func getClipboardCmd() (string, []string) {
+func getClipboardCmd() (cmd string, args []string) {
 	switch runtime.GOOS {
 	case "darwin":
 		return "pbcopy", nil
@@ -438,7 +431,7 @@ func NewModel(ref string) (Model, tea.Cmd) {
 	return m, tea.Batch(tickCmd(), loadCmd, s.Tick)
 }
 
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return m.filepicker.Init()
 }
 
@@ -455,7 +448,7 @@ type configMsg struct {
 // Add tickMsg type
 type tickMsg time.Time
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
@@ -506,11 +499,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check for progress updates if channel exists
 		if progressChan != nil {
 			select {
-			case progress, ok := <-progressChan:
+			case progressUpdate, ok := <-progressChan:
 				if ok {
-					debug("Progress received in tick: %.2f", progress)
+					debug("Progress received in tick: %.2f", progressUpdate)
 					newModel := m
-					newModel.progress = progress
+					newModel.progress = progressUpdate
 					return newModel, tea.Batch(cmds...)
 				}
 			default:
@@ -707,9 +700,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, hideMessageAfter(3 * time.Second)
 				}
 
-				if name, _, ok := m.filepicker.SelectedFile(); ok {
+				if fileName, _, ok := m.filepicker.SelectedFile(); ok {
 					for _, file := range files {
-						if file.Name == name {
+						if file.Name == fileName {
 							if !file.IsDir {
 								return m, tea.Batch(
 									exportFile(m.currentLayer, file),
@@ -758,12 +751,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, hideMessageAfter(3 * time.Second)
 				}
 
-				if name, _, ok := m.filepicker.SelectedFile(); ok {
+				if fileName, _, ok := m.filepicker.SelectedFile(); ok {
 					for _, file := range files {
-						if file.Name == name {
+						if file.Name == fileName {
 							if file.IsDir {
 								m.currentPath = file.Path
-								newPath := filepath.Join(m.filepicker.CurrentPath(), name)
+								newPath := filepath.Join(m.filepicker.CurrentPath(), fileName)
 								m.filepicker.SetPath(newPath)
 								return m, m.filepicker.Init()
 							} else {
@@ -947,7 +940,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) View() string {
+func (m *Model) View() string {
 	if !m.ready {
 		return "\n  Loading..."
 	}
@@ -1211,7 +1204,7 @@ func (m *Model) showFiles(layer *container.Layer, path string) error {
 	tarfsPath := path
 	if path == "/" {
 		tarfsPath = "."
-	} else if len(path) > 0 && path[0] == '/' {
+	} else if path != "" && path[0] == '/' {
 		tarfsPath = path[1:]
 	}
 
@@ -1286,7 +1279,7 @@ func viewFile(layer *container.Layer, path string) tea.Cmd {
 
 		// Convert path for tarfs
 		tarfsPath := path
-		if len(path) > 0 && path[0] == '/' {
+		if path != "" && path[0] == '/' {
 			tarfsPath = path[1:]
 		}
 
@@ -1440,11 +1433,11 @@ func colorizeJSON(input []byte) []byte {
 
 		if len(parts) == 2 {
 			// Line contains both key and value
-			key := strings.Trim(parts[0], `" ,`)
+			keyStr := strings.Trim(parts[0], `" ,`)
 			value := strings.TrimSpace(parts[1])
 
 			// Add colors
-			coloredKey := fmt.Sprintf("\x1b[36m%s\x1b[0m", key) // Cyan for keys
+			coloredKey := fmt.Sprintf("\x1b[36m%s\x1b[0m", keyStr) // Cyan for keys
 			coloredValue := value
 
 			// Color different types of values

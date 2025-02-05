@@ -45,14 +45,14 @@ func setupTestFS() *mockFS {
 	fs.addDir(".hidden_dir")
 
 	// Add test files in sorted order (to ensure consistent test results)
-	fs.addFile("file1.txt", []byte("content1"), 0644)
-	fs.addFile("file2.txt", []byte("content2"), 0644)
-	fs.addFile("file3.txt", []byte("content3"), 0644)
-	fs.addFile("testdir/file4.txt", []byte("content4"), 0644)
-	fs.addFile("testdir/file5.txt", []byte("content5"), 0644)
-	fs.addFile("testdir/subdir/file6.txt", []byte("content6"), 0644)
-	fs.addFile(".hidden_file", []byte("hidden"), 0644)
-	fs.addFile("testdir/.hidden_file2", []byte("hidden2"), 0644)
+	fs.addFile("file1.txt", []byte("content1"), 0o644)
+	fs.addFile("file2.txt", []byte("content2"), 0o644)
+	fs.addFile("file3.txt", []byte("content3"), 0o644)
+	fs.addFile("testdir/file4.txt", []byte("content4"), 0o644)
+	fs.addFile("testdir/file5.txt", []byte("content5"), 0o644)
+	fs.addFile("testdir/subdir/file6.txt", []byte("content6"), 0o644)
+	fs.addFile(".hidden_file", []byte("hidden"), 0o644)
+	fs.addFile("testdir/.hidden_file2", []byte("hidden2"), 0o644)
 
 	return fs
 }
@@ -443,7 +443,7 @@ func TestErrorCases(t *testing.T) {
 	errorFS := &mockFS{
 		MapFS: fstest.MapFS{
 			"error_dir": &fstest.MapFile{
-				Mode: fs.ModeDir | 0000, // No permissions
+				Mode: fs.ModeDir | 0o000, // No permissions
 			},
 		},
 	}

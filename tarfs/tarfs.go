@@ -46,7 +46,7 @@ func (h *Header) IsDir() bool {
 
 func (h *Header) Type() fs.FileMode {
 	switch h.typeflag {
-	case tar.TypeReg, tar.TypeRegA:
+	case tar.TypeReg:
 		return 0
 	case tar.TypeLink:
 		return 0 // Treat hard links as regular files
@@ -149,7 +149,7 @@ func New(reader io.ReadSeeker) (*FS, error) {
 				name:     filePath,
 				linkname: hdr.Linkname,
 				size:     hdr.Size,
-				mode:     fs.FileMode(hdr.Mode),
+				mode:     fs.FileMode(uint32(hdr.Mode)),
 				modTime:  hdr.ModTime.UTC(),
 			},
 			Offset: pos,

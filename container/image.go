@@ -21,7 +21,7 @@ var debugLogger *log.Logger
 
 func init() {
 	// Open log file
-	logFile, err := os.OpenFile("/tmp/lcat-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile("/tmp/lcat-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
