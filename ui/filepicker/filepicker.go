@@ -220,12 +220,20 @@ func (m Model) loadFiles(focusPath string) tea.Msg {
 		debugLogger.Printf("- Show hidden: %v", m.showHidden)
 	}
 
+	if m.fs == nil {
+		return filesLoadedMsg{
+			err: fmt.Errorf("filesystem is nil"),
+		}
+	}
+
 	entries, err := fs.ReadDir(m.fs, m.currentPath)
 	if err != nil {
 		if debugLogger != nil {
 			debugLogger.Printf("Error reading directory: %v", err)
 		}
-		return errMsg(err)
+		return filesLoadedMsg{
+			err: fmt.Errorf("failed to read directory: %w", err),
+		}
 	}
 
 	var files []fs.DirEntry
