@@ -339,6 +339,67 @@ func copyToClipboard(text string) tea.Cmd {
 	}
 }
 
+// Custom colors for the application
+var (
+	selectedColor  = lipgloss.Color("#61AFEF") // A calm blue for selected items
+	normalColor    = lipgloss.Color("#ABB2BF") // A soft white for normal items
+	dimmedColor    = lipgloss.Color("#636D83") // A muted color for less important text
+	highlightColor = lipgloss.Color("#FFB86C") // A soft orange for highlights (filter, etc)
+)
+
+// newCustomList creates a new list with custom styling
+func newCustomList(items []list.Item, width, height int) list.Model {
+	delegate := list.NewDefaultDelegate()
+
+	// Custom styles for the delegate
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(selectedColor).
+		Background(lipgloss.NoColor{}).
+		BorderLeft(true).
+		BorderLeftForeground(selectedColor).
+		Bold(true)
+
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+		Foreground(lipgloss.Color("#4B5669")). // Darker and more muted color for selected description
+		Background(lipgloss.NoColor{}).
+		BorderLeft(true).
+		BorderLeftForeground(selectedColor)
+
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(normalColor).
+		BorderLeft(true).
+		BorderLeftForeground(lipgloss.NoColor{})
+
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
+		Foreground(lipgloss.Color("#3E4551")). // Even darker color for normal description
+		BorderLeft(true).
+		BorderLeftForeground(lipgloss.NoColor{})
+
+	// Create the list
+	l := list.New(items, delegate, width, height)
+	l.SetShowTitle(false)
+	l.SetFilteringEnabled(true)
+	l.DisableQuitKeybindings()
+	l.SetShowHelp(false)
+
+	// Custom styles for the list
+	l.Styles.Title = l.Styles.Title.
+		Foreground(selectedColor).
+		Bold(true).
+		Padding(0, 1)
+
+	l.Styles.FilterPrompt = l.Styles.FilterPrompt.
+		Foreground(highlightColor)
+
+	l.Styles.FilterCursor = l.Styles.FilterCursor.
+		Foreground(highlightColor)
+
+	l.Styles.NoItems = l.Styles.NoItems.
+		Foreground(dimmedColor)
+
+	return l
+}
+
 func NewModel(ref string) (Model, tea.Cmd) {
 	// Check if image exists locally first
 	reference, err := name.ParseReference(ref)
@@ -359,26 +420,8 @@ func NewModel(ref string) (Model, tea.Cmd) {
 	// Create a new channel for progress updates
 	progressChan = make(chan float64, 100)
 
-	// Create an empty list with default delegate
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(delegate.Styles.SelectedTitle.GetForeground()).
-		Background(delegate.Styles.SelectedDesc.GetBackground()).
-		Bold(true)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(delegate.Styles.SelectedDesc.GetForeground()).
-		Background(delegate.Styles.SelectedDesc.GetBackground())
-
-	// Create an initial empty list
-	l := list.New([]list.Item{}, delegate, 0, 0)
-	l.SetShowTitle(false)
-	l.SetFilteringEnabled(true)
-	l.DisableQuitKeybindings()
-	l.SetShowHelp(false)
-	l.Styles.Title = l.Styles.Title.
-		Foreground(l.Styles.Title.GetForeground()).
-		Bold(true).
-		Padding(0, 1)
+	// Create an initial empty list with custom styling
+	l := newCustomList([]list.Item{}, 0, 0)
 	l.Title = "Loading..."
 
 	// Initialize loading bar
@@ -390,15 +433,15 @@ func NewModel(ref string) (Model, tea.Cmd) {
 	// Initialize spinner
 	s := spinner.New()
 	s.Spinner = spinner.Points
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("36"))
+	s.Style = lipgloss.NewStyle().Foreground(selectedColor)
 
 	debug("Creating new model with isLocalImage=%v", isLocalImage)
 	m := Model{
 		list:           l,
 		tabs:           []string{"📦 Layers", "📄 Manifest", "⚙️  Config"},
 		activeTab:      0,
-		tabStyle:       lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("240")),
-		activeTabStyle: lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("36")).Bold(true),
+		tabStyle:       lipgloss.NewStyle().Padding(0, 2).Foreground(dimmedColor),
+		activeTabStyle: lipgloss.NewStyle().Padding(0, 2).Foreground(selectedColor).Bold(true),
 		mode:           PullingMode,
 		keys:           newKeyMap(),
 		currentPath:    "/",
@@ -551,25 +594,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
-		delegate := list.NewDefaultDelegate()
-		delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-			Foreground(delegate.Styles.SelectedTitle.GetForeground()).
-			Background(delegate.Styles.SelectedDesc.GetBackground()).
-			Bold(true)
-		delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-			Foreground(delegate.Styles.SelectedDesc.GetForeground()).
-			Background(delegate.Styles.SelectedDesc.GetBackground())
-
-		l := list.New(items, delegate, m.width-4, m.height-6)
-		l.SetShowTitle(false)
-		l.SetFilteringEnabled(true)
-		l.DisableQuitKeybindings()
-		l.SetShowHelp(false)
-		l.Styles.Title = l.Styles.Title.
-			Foreground(l.Styles.Title.GetForeground()).
-			Bold(true).
-			Padding(0, 1)
-
+		l := newCustomList(items, m.width-4, m.height-6)
 		newModel.list = l
 		debug("Returning new model: isLocalImage=%v, mode=%v", newModel.isLocalImage, newModel.mode)
 		return newModel, nil
