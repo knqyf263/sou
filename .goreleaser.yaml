@@ -1,0 +1,100 @@
+project_name: sou
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+    flags:
+      - -trimpath
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+dockers:
+  - image_templates:
+      - "ghcr.io/knqyf263/{{ .ProjectName }}:{{ .Version }}-amd64"
+      - "ghcr.io/knqyf263/{{ .ProjectName }}:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+    goarch: amd64
+  - image_templates:
+      - "ghcr.io/knqyf263/{{ .ProjectName }}:{{ .Version }}-arm64"
+      - "ghcr.io/knqyf263/{{ .ProjectName }}:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+    goarch: arm64
+
+docker_manifests:
+  - name_template: ghcr.io/knqyf263/{{ .ProjectName }}:{{ .Version }}
+    image_templates:
+      - ghcr.io/knqyf263/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/knqyf263/{{ .ProjectName }}:{{ .Version }}-arm64
+  - name_template: ghcr.io/knqyf263/{{ .ProjectName }}:latest
+    image_templates:
+      - ghcr.io/knqyf263/{{ .ProjectName }}:latest-amd64
+      - ghcr.io/knqyf263/{{ .ProjectName }}:latest-arm64
+
+brews:
+  - name: sou
+    repository:
+      owner: knqyf263
+      name: homebrew-sou
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    homepage: "https://github.com/knqyf263/sou"
+    description: "A TUI tool to explore container images"
+    license: "MIT"
+    test: |
+      system "#{bin}/sou --help"
+    install: |
+      bin.install "sou"
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch 

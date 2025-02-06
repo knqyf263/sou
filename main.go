@@ -13,8 +13,20 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var (
+	version = "dev"
+)
+
 func main() {
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "show version")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("sou version %s\n", version)
+		return
+	}
+
 	if flag.NArg() != 1 {
 		fmt.Println("Usage: sou <image-name>")
 		return
