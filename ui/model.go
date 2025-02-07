@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,21 +25,8 @@ import (
 	"github.com/knqyf263/sou/ui/filepicker"
 )
 
-var debugLogger *log.Logger
-
-func init() {
-	// Open log file
-	logFile, err := os.OpenFile("/tmp/lcat-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	debugLogger = log.New(logFile, "", log.LstdFlags)
-}
-
 func debug(format string, v ...interface{}) {
-	if debugLogger != nil {
-		debugLogger.Printf(format, v...)
-	}
+	slog.Debug(fmt.Sprintf(format, v...))
 }
 
 type Mode int

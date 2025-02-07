@@ -9,8 +9,7 @@ package filepicker
 import (
 	"fmt"
 	"io/fs"
-	"log"
-	"os"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -24,15 +23,8 @@ import (
 	"github.com/dustin/go-humanize"
 )
 
-var debugLogger *log.Logger
-
-func init() {
-	// Open log file
-	logFile, err := os.OpenFile("/tmp/filepicker.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	debugLogger = log.New(logFile, "", log.LstdFlags)
+func debug(format string, v ...interface{}) {
+	slog.Debug(fmt.Sprintf(format, v...))
 }
 
 const (
@@ -211,14 +203,12 @@ type filesLoadedMsg struct {
 }
 
 func (m *Model) loadFiles(focusPath string) tea.Msg {
-	if debugLogger != nil {
-		debugLogger.Printf("===== Loading Files Start =====")
-		debugLogger.Printf("Loading files for path: %s", m.currentPath)
-		debugLogger.Printf("Focus path: %s", focusPath)
-		debugLogger.Printf("Current state:")
-		debugLogger.Printf("- Selected index: %d", m.selectedIndex)
-		debugLogger.Printf("- Show hidden: %v", m.showHidden)
-	}
+	debug("===== Loading Files Start =====")
+	debug("Loading files for path: %s", m.currentPath)
+	debug("Focus path: %s", focusPath)
+	debug("Current state:")
+	debug("- Selected index: %d", m.selectedIndex)
+	debug("- Show hidden: %v", m.showHidden)
 
 	if m.fs == nil {
 		return filesLoadedMsg{
@@ -228,9 +218,7 @@ func (m *Model) loadFiles(focusPath string) tea.Msg {
 
 	entries, err := fs.ReadDir(m.fs, m.currentPath)
 	if err != nil {
-		if debugLogger != nil {
-			debugLogger.Printf("Error reading directory: %v", err)
-		}
+		debug("Error reading directory: %v", err)
 		return filesLoadedMsg{
 			err: fmt.Errorf("failed to read directory: %w", err),
 		}
@@ -240,21 +228,15 @@ func (m *Model) loadFiles(focusPath string) tea.Msg {
 	for _, entry := range entries {
 		name := entry.Name()
 		if !m.showHidden && strings.HasPrefix(name, ".") {
-			if debugLogger != nil {
-				debugLogger.Printf("Skipping hidden file: %s", name)
-			}
+			debug("Skipping hidden file: %s", name)
 			continue
 		}
 		if entry.IsDir() && !m.DirAllowed {
-			if debugLogger != nil {
-				debugLogger.Printf("Skipping directory (not allowed): %s", name)
-			}
+			debug("Skipping directory (not allowed): %s", name)
 			continue
 		}
 		if !entry.IsDir() && !m.FileAllowed {
-			if debugLogger != nil {
-				debugLogger.Printf("Skipping file (not allowed): %s", name)
-			}
+			debug("Skipping file (not allowed): %s", name)
 			continue
 		}
 		files = append(files, entry)
@@ -272,14 +254,12 @@ func (m *Model) loadFiles(focusPath string) tea.Msg {
 		return files[i].Name() < files[j].Name()
 	})
 
-	if debugLogger != nil {
-		debugLogger.Printf("Files loaded and sorted:")
-		debugLogger.Printf("Total files found: %d", len(files))
-		for i, file := range files {
-			debugLogger.Printf("[%d] %s (isDir: %v)", i, file.Name(), file.IsDir())
-		}
-		debugLogger.Printf("===== Loading Files End =====")
+	debug("Files loaded and sorted:")
+	debug("Total files found: %d", len(files))
+	for i, file := range files {
+		debug("[%d] %s (isDir: %v)", i, file.Name(), file.IsDir())
 	}
+	debug("===== Loading Files End =====")
 
 	return filesLoadedMsg{
 		files:     files,
@@ -482,31 +462,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case filesLoadedMsg:
 		if msg.err != nil {
-			if debugLogger != nil {
-				debugLogger.Printf("Error in filesLoadedMsg: %v", msg.err)
-			}
+			debug("Error in filesLoadedMsg: %v", msg.err)
 			return m, nil
 		}
 
 		m.files = msg.files
 
-		if debugLogger != nil {
-			debugLogger.Printf("===== Files Loaded Message Processing Start =====")
-			debugLogger.Printf("Current state:")
-			debugLogger.Printf("- Current path: %s", m.currentPath)
-			debugLogger.Printf("- Number of files: %d", len(m.files))
-			debugLogger.Printf("- Current selected index: %d", m.selectedIndex)
-			debugLogger.Printf("- Focus path: %s", msg.focusPath)
-		}
+		debug("===== Files Loaded Message Processing Start =====")
+		debug("Current state:")
+		debug("- Current path: %s", m.currentPath)
+		debug("- Number of files: %d", len(m.files))
+		debug("- Current selected index: %d", m.selectedIndex)
+		debug("- Focus path: %s", msg.focusPath)
 
 		// If focusPath is specified, try to find and focus on that directory
 		if msg.focusPath != "" {
 			for i, file := range m.files {
 				if file.Name() == msg.focusPath {
 					m.selectedIndex = i
-					if debugLogger != nil {
-						debugLogger.Printf("Found focus path at index: %d", i)
-					}
+					debug("Found focus path at index: %d", i)
 					break
 				}
 			}
@@ -515,25 +489,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Ensure selected index is within bounds
 		if m.selectedIndex >= len(m.files) {
 			m.selectedIndex = len(m.files) - 1
-			if debugLogger != nil {
-				debugLogger.Printf("- Adjusted to last item: %d", m.selectedIndex)
-			}
+			debug("- Adjusted to last item: %d", m.selectedIndex)
 		}
 		if m.selectedIndex < 0 {
 			m.selectedIndex = 0
-			if debugLogger != nil {
-				debugLogger.Printf("- Adjusted to first item: %d", m.selectedIndex)
-			}
+			debug("- Adjusted to first item: %d", m.selectedIndex)
 		}
 
-		if debugLogger != nil {
-			debugLogger.Printf("Final state:")
-			debugLogger.Printf("- Selected index: %d", m.selectedIndex)
-			if m.selectedIndex < len(m.files) {
-				debugLogger.Printf("- Selected file: %s", m.files[m.selectedIndex].Name())
-			}
-			debugLogger.Printf("===== Files Loaded Message Processing End =====")
+		debug("Final state:")
+		debug("- Selected index: %d", m.selectedIndex)
+		if m.selectedIndex < len(m.files) {
+			debug("- Selected file: %s", m.files[m.selectedIndex].Name())
 		}
+		debug("===== Files Loaded Message Processing End =====")
 
 		return m, nil
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,21 +17,8 @@ import (
 	"github.com/knqyf263/sou/tarfs"
 )
 
-var debugLogger *log.Logger
-
-func init() {
-	// Open log file
-	logFile, err := os.OpenFile("/tmp/lcat-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	debugLogger = log.New(logFile, "", log.LstdFlags)
-}
-
 func debug(format string, v ...interface{}) {
-	if debugLogger != nil {
-		debugLogger.Printf("sou/container: "+format, v...)
-	}
+	slog.Debug(fmt.Sprintf(format, v...))
 }
 
 // Image represents a container image

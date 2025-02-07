@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/knqyf263/sou/container"
@@ -18,18 +20,48 @@ var (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	// Initialize slog
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return fmt.Errorf("failed to get cache directory: %w", err)
+	}
+
+	// Create sou directory in cache
+	souCacheDir := filepath.Join(cacheDir, "sou")
+	if err := os.MkdirAll(souCacheDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
+	logFile, err := os.OpenFile(filepath.Join(souCacheDir, "debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer logFile.Close()
+
+	// Configure slog to write to the file
+	logger := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	slog.SetDefault(logger)
+
 	var showVersion bool
 	flag.BoolVar(&showVersion, "version", false, "show version")
 	flag.Parse()
 
 	if showVersion {
 		fmt.Printf("sou version %s\n", version)
-		return
+		return nil
 	}
 
 	if flag.NArg() != 1 {
-		fmt.Println("Usage: sou <image-name>")
-		return
+		return fmt.Errorf("usage: sou <image-name>")
 	}
 
 	// Setup signal handling for cleanup
@@ -63,13 +95,14 @@ func main() {
 	}()
 
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error running program: %v\n", err)
-		return
+		return fmt.Errorf("error running program: %w", err)
 	}
+
+	return nil
 }
 
 func cleanup() {
 	if err := container.CleanupCache(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error cleaning up cache: %v\n", err)
+		slog.Error("failed to clean up cache", "error", err)
 	}
 }
