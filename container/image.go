@@ -131,56 +131,99 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 	}
 
 	var imageLayers []Layer
-	historyIndex := len(configFile.History) - 1
-	nonEmptyLayers := 0
 
-	// Count non-empty layers first
-	for i := len(configFile.History) - 1; i >= 0; i-- {
-		if !configFile.History[i].EmptyLayer {
-			nonEmptyLayers++
+	// If history is empty or incomplete, create layers with N/A commands
+	if len(configFile.History) == 0 {
+		debug("No history information available, creating layers with N/A commands")
+		// Process layers from newest to oldest
+		for i := len(layers) - 1; i >= 0; i-- {
+			layer := layers[i]
+			diffID, err := layer.DiffID()
+			if err != nil {
+				continue
+			}
+
+			size, err := layer.Size()
+			if err != nil {
+				continue
+			}
+
+			imageLayers = append(imageLayers, Layer{
+				DiffID:  diffID.String(),
+				Size:    size,
+				Command: "N/A",
+				layer:   layer,
+			})
 		}
+		return &Image{
+			Reference: ref,
+			Layers:    imageLayers,
+			img:       img,
+		}, nil
 	}
 
-	if nonEmptyLayers != len(layers) {
-		return nil, fmt.Errorf("mismatch between number of layers (%d) and non-empty history entries (%d)", len(layers), nonEmptyLayers)
-	}
-
-	layerIndex := 0
-	for historyIndex >= 0 && layerIndex < len(layers) {
-		if configFile.History[historyIndex].EmptyLayer {
-			historyIndex--
-			continue
-		}
-
-		layer := layers[layerIndex]
+	// Create a map of DiffIDs to their corresponding layers for quick lookup
+	layerMap := make(map[string]v1.Layer)
+	for _, layer := range layers {
 		diffID, err := layer.DiffID()
 		if err != nil {
-			layerIndex++
+			continue
+		}
+		layerMap[diffID.String()] = layer
+	}
+
+	// Process history entries from newest to oldest
+	nonEmptyCount := 0
+	for i := len(configFile.History) - 1; i >= 0; i-- {
+		history := configFile.History[i]
+		command := history.CreatedBy
+		if command == "" {
+			command = "N/A"
+		}
+
+		if !history.EmptyLayer {
+			if nonEmptyCount < len(layers) {
+				layer := layers[len(layers)-1-nonEmptyCount]
+				diffID, err := layer.DiffID()
+				if err != nil {
+					continue
+				}
+
+				size, err := layer.Size()
+				if err != nil {
+					continue
+				}
+
+				imageLayers = append(imageLayers, Layer{
+					DiffID:  diffID.String(),
+					Size:    size,
+					Command: command,
+					layer:   layer,
+				})
+				nonEmptyCount++
+			}
+		}
+	}
+
+	// If there are remaining layers, add them with N/A commands
+	for i := len(layers) - 1 - nonEmptyCount; i >= 0; i-- {
+		layer := layers[i]
+		diffID, err := layer.DiffID()
+		if err != nil {
 			continue
 		}
 
 		size, err := layer.Size()
 		if err != nil {
-			layerIndex++
-			continue
-		}
-
-		command := configFile.History[historyIndex].CreatedBy
-		if command == "" {
-			layerIndex++
-			historyIndex--
 			continue
 		}
 
 		imageLayers = append(imageLayers, Layer{
 			DiffID:  diffID.String(),
 			Size:    size,
-			Command: command,
+			Command: "N/A",
 			layer:   layer,
 		})
-
-		layerIndex++
-		historyIndex--
 	}
 
 	return &Image{
