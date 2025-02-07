@@ -118,6 +118,52 @@ func NewImage(ref string, progress ProgressFunc) (*Image, bool, error) {
 	return image, false, nil
 }
 
+// isBuildpacksImage checks if the image is built with Cloud Native Buildpacks
+func isBuildpacksImage(configFile *v1.ConfigFile) bool {
+	if configFile == nil {
+		return false
+	}
+
+	// Check for CNB labels
+	labels := configFile.Config.Labels
+	if labels == nil {
+		return false
+	}
+
+	// Common Cloud Native Buildpacks labels
+	buildpackLabels := []string{
+		"io.buildpacks.build.metadata",
+		"io.buildpacks.lifecycle.metadata",
+		"io.buildpacks.stack.id",
+	}
+
+	for _, label := range buildpackLabels {
+		if _, ok := labels[label]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isDistrolessLayer checks if the layer appears to be from a distroless image
+func isDistrolessLayer(h v1.History) bool {
+	return h.Created.Format(time.RFC3339Nano) == "0001-01-01T00:00:00Z"
+}
+
+// shouldProcessLayer determines if a layer should be processed based on the image type and layer history
+func shouldProcessLayer(h v1.History, isBuildpacks bool) bool {
+	if isBuildpacks {
+		return true // Always process layers for buildpacks images
+	}
+
+	if isDistrolessLayer(h) {
+		return true // Always process distroless layers
+	}
+
+	return !h.EmptyLayer // For regular images, skip empty layers
+}
+
 // createImageFromV1 creates an Image instance from a v1.Image
 func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 	layers, err := img.Layers()
@@ -148,18 +194,35 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 				continue
 			}
 
-			imageLayers = append([]Layer{{
+			imageLayers = append(imageLayers, Layer{
 				DiffID:  diffID.String(),
 				Size:    size,
 				Command: "N/A",
 				layer:   layer,
-			}}, imageLayers...)
+			})
 		}
 		return &Image{
 			Reference: ref,
 			Layers:    imageLayers,
 			img:       img,
 		}, nil
+	}
+
+	// Check if this is a buildpacks image
+	isBuildpacks := isBuildpacksImage(configFile)
+
+	// Detect if history is in ascending or descending order
+	ascending := true // Default to ascending (oldest first)
+
+	// Find the first two entries with different timestamps
+	for i := 1; i < len(configFile.History); i++ {
+		curr := configFile.History[i].Created.Time
+		prev := configFile.History[i-1].Created.Time
+
+		if !curr.Equal(prev) {
+			ascending = curr.After(prev)
+			break
+		}
 	}
 
 	// Create a map of DiffIDs to their corresponding layers for quick lookup
@@ -185,25 +248,10 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 	// Get rootfs DiffIDs which are in the correct order (oldest to newest)
 	diffIDs := configFile.RootFS.DiffIDs
 
-	// Detect if history is in ascending or descending order
-	isDescending := false
-	var lastValidTime time.Time
-	for _, h := range configFile.History {
-		if !h.Created.IsZero() {
-			currentTime := h.Created.Time
-			if !lastValidTime.IsZero() {
-				isDescending = currentTime.After(lastValidTime)
-				break
-			}
-			lastValidTime = currentTime
-		}
-	}
-
-	// Count actual non-empty layers after applying distroless rule
+	// Count actual non-empty layers after applying special rules
 	nonEmptyCount := 0
 	for _, h := range configFile.History {
-		isEmptyLayer := h.EmptyLayer && h.Created.Format(time.RFC3339Nano) != "0001-01-01T00:00:00Z"
-		if !isEmptyLayer {
+		if shouldProcessLayer(h, isBuildpacks) {
 			nonEmptyCount++
 		}
 	}
@@ -224,12 +272,12 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 				continue
 			}
 
-			imageLayers = append([]Layer{{
+			imageLayers = append(imageLayers, Layer{
 				DiffID:  diffID.String(),
 				Size:    size,
 				Command: "N/A",
 				layer:   layer,
-			}}, imageLayers...)
+			})
 		}
 		return &Image{
 			Reference: ref,
@@ -241,22 +289,24 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 	// Create a map to track processed layers to avoid duplication
 	processedLayers := make(map[string]bool)
 
-	// Process history entries based on detected order
-	layerIndex := 0
+	// Process history entries based on their order
+	layerIndex := len(diffIDs) - 1 // Start from the newest layer
 	history := configFile.History
-	if !isDescending {
-		// If history is in ascending order (oldest to newest), reverse it
-		for i := 0; i < len(history)/2; i++ {
-			j := len(history) - 1 - i
-			history[i], history[j] = history[j], history[i]
-		}
+
+	// If history is in ascending order (oldest first), process from newest to oldest for display
+	// If history is in descending order (newest first), process from oldest to newest for display
+	startIdx := len(history) - 1
+	endIdx := 0
+	step := -1
+
+	if !ascending {
+		startIdx = 0
+		endIdx = len(history) - 1
+		step = 1
 	}
 
-	// Process history entries from newest to oldest
-	for i := 0; i < len(history); i++ {
-		// For distroless images, ignore empty_layer flag if created is 0001-01-01T00:00:00Z
-		isEmptyLayer := history[i].EmptyLayer && history[i].Created.Format(time.RFC3339Nano) != "0001-01-01T00:00:00Z"
-		if !isEmptyLayer && layerIndex < len(diffIDs) {
+	for i := startIdx; ascending && i >= endIdx || !ascending && i <= endIdx; i += step {
+		if shouldProcessLayer(history[i], isBuildpacks) && layerIndex >= 0 {
 			diffID := diffIDs[layerIndex].String()
 			if layerInfo, ok := diffIDMap[diffID]; ok {
 				command := history[i].CreatedBy
@@ -264,29 +314,29 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 					command = "N/A"
 				}
 
-				imageLayers = append([]Layer{{
+				imageLayers = append(imageLayers, Layer{
 					DiffID:  diffID,
 					Size:    layerInfo.size,
 					Command: command,
 					layer:   layerInfo.layer,
-				}}, imageLayers...)
+				})
 				processedLayers[diffID] = true
-				layerIndex++
+				layerIndex--
 			}
 		}
 	}
 
 	// Add any remaining unprocessed layers with N/A commands
-	for i := layerIndex; i < len(diffIDs); i++ {
+	for i := layerIndex; i >= 0; i-- {
 		diffID := diffIDs[i].String()
 		if !processedLayers[diffID] {
 			if layerInfo, ok := diffIDMap[diffID]; ok {
-				imageLayers = append([]Layer{{
+				imageLayers = append(imageLayers, Layer{
 					DiffID:  diffID,
 					Size:    layerInfo.size,
 					Command: "N/A",
 					layer:   layerInfo.layer,
-				}}, imageLayers...)
+				})
 				processedLayers[diffID] = true
 			}
 		}
