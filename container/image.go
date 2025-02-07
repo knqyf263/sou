@@ -148,12 +148,12 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 				continue
 			}
 
-			imageLayers = append(imageLayers, Layer{
+			imageLayers = append([]Layer{{
 				DiffID:  diffID.String(),
 				Size:    size,
 				Command: "N/A",
 				layer:   layer,
-			})
+			}}, imageLayers...)
 		}
 		return &Image{
 			Reference: ref,
@@ -163,67 +163,133 @@ func createImageFromV1(img v1.Image, ref string) (*Image, error) {
 	}
 
 	// Create a map of DiffIDs to their corresponding layers for quick lookup
-	layerMap := make(map[string]v1.Layer)
+	diffIDMap := make(map[string]struct {
+		layer v1.Layer
+		size  int64
+	})
 	for _, layer := range layers {
 		diffID, err := layer.DiffID()
 		if err != nil {
 			continue
 		}
-		layerMap[diffID.String()] = layer
-	}
-
-	// Process history entries from newest to oldest
-	nonEmptyCount := 0
-	for i := len(configFile.History) - 1; i >= 0; i-- {
-		history := configFile.History[i]
-		command := history.CreatedBy
-		if command == "" {
-			command = "N/A"
-		}
-
-		if !history.EmptyLayer {
-			if nonEmptyCount < len(layers) {
-				layer := layers[len(layers)-1-nonEmptyCount]
-				diffID, err := layer.DiffID()
-				if err != nil {
-					continue
-				}
-
-				size, err := layer.Size()
-				if err != nil {
-					continue
-				}
-
-				imageLayers = append(imageLayers, Layer{
-					DiffID:  diffID.String(),
-					Size:    size,
-					Command: command,
-					layer:   layer,
-				})
-				nonEmptyCount++
-			}
-		}
-	}
-
-	// If there are remaining layers, add them with N/A commands
-	for i := len(layers) - 1 - nonEmptyCount; i >= 0; i-- {
-		layer := layers[i]
-		diffID, err := layer.DiffID()
-		if err != nil {
-			continue
-		}
-
 		size, err := layer.Size()
 		if err != nil {
 			continue
 		}
+		diffIDMap[diffID.String()] = struct {
+			layer v1.Layer
+			size  int64
+		}{layer, size}
+	}
 
-		imageLayers = append(imageLayers, Layer{
-			DiffID:  diffID.String(),
-			Size:    size,
-			Command: "N/A",
-			layer:   layer,
-		})
+	// Get rootfs DiffIDs which are in the correct order (oldest to newest)
+	diffIDs := configFile.RootFS.DiffIDs
+
+	// Detect if history is in ascending or descending order
+	isDescending := false
+	var lastValidTime time.Time
+	for _, h := range configFile.History {
+		if !h.Created.IsZero() {
+			currentTime := h.Created.Time
+			if !lastValidTime.IsZero() {
+				isDescending = currentTime.After(lastValidTime)
+				break
+			}
+			lastValidTime = currentTime
+		}
+	}
+
+	// Count actual non-empty layers after applying distroless rule
+	nonEmptyCount := 0
+	for _, h := range configFile.History {
+		isEmptyLayer := h.EmptyLayer && h.Created.Format(time.RFC3339Nano) != "0001-01-01T00:00:00Z"
+		if !isEmptyLayer {
+			nonEmptyCount++
+		}
+	}
+
+	// Verify we have the correct number of layers
+	if nonEmptyCount != len(layers) {
+		debug("Creating layers with available information (non-empty: %d, layers: %d)", nonEmptyCount, len(layers))
+		// Process layers from newest to oldest
+		for i := len(layers) - 1; i >= 0; i-- {
+			layer := layers[i]
+			diffID, err := layer.DiffID()
+			if err != nil {
+				continue
+			}
+
+			size, err := layer.Size()
+			if err != nil {
+				continue
+			}
+
+			imageLayers = append([]Layer{{
+				DiffID:  diffID.String(),
+				Size:    size,
+				Command: "N/A",
+				layer:   layer,
+			}}, imageLayers...)
+		}
+		return &Image{
+			Reference: ref,
+			Layers:    imageLayers,
+			img:       img,
+		}, nil
+	}
+
+	// Create a map to track processed layers to avoid duplication
+	processedLayers := make(map[string]bool)
+
+	// Process history entries based on detected order
+	layerIndex := 0
+	history := configFile.History
+	if !isDescending {
+		// If history is in ascending order (oldest to newest), reverse it
+		for i := 0; i < len(history)/2; i++ {
+			j := len(history) - 1 - i
+			history[i], history[j] = history[j], history[i]
+		}
+	}
+
+	// Process history entries from newest to oldest
+	for i := 0; i < len(history); i++ {
+		// For distroless images, ignore empty_layer flag if created is 0001-01-01T00:00:00Z
+		isEmptyLayer := history[i].EmptyLayer && history[i].Created.Format(time.RFC3339Nano) != "0001-01-01T00:00:00Z"
+		if !isEmptyLayer && layerIndex < len(diffIDs) {
+			diffID := diffIDs[layerIndex].String()
+			if layerInfo, ok := diffIDMap[diffID]; ok {
+				command := history[i].CreatedBy
+				if command == "" {
+					command = "N/A"
+				}
+
+				imageLayers = append([]Layer{{
+					DiffID:  diffID,
+					Size:    layerInfo.size,
+					Command: command,
+					layer:   layerInfo.layer,
+				}}, imageLayers...)
+				processedLayers[diffID] = true
+				layerIndex++
+			}
+		}
+	}
+
+	// Add any remaining unprocessed layers with N/A commands
+	for i := layerIndex; i < len(diffIDs); i++ {
+		diffID := diffIDs[i].String()
+		if !processedLayers[diffID] {
+			if layerInfo, ok := diffIDMap[diffID]; ok {
+				imageLayers = append([]Layer{{
+					DiffID:  diffID,
+					Size:    layerInfo.size,
+					Command: "N/A",
+					layer:   layerInfo.layer,
+				}}, imageLayers...)
+				processedLayers[diffID] = true
+			}
+		}
 	}
 
 	return &Image{
